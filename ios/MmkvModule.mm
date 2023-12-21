@@ -1,3 +1,7 @@
+// Add Auto Keychain Protection
+
+#import <Security/Security.h> // Keychain access
+
 #import "MmkvModule.h"
 #import "JSIUtils.h"
 
@@ -12,10 +16,84 @@
 using namespace facebook;
 
 @implementation MmkvModule
+NSString *encryptionKeyAuto = nil; // Added for Keychain encryption key
 
 @synthesize bridge=_bridge;
 
 RCT_EXPORT_MODULE(MMKV)
+
+/* Keychain related methods - start */
+
+- (NSString *)generateEncryptionKey {
+    // Implement your logic here to generate a secure encryption key
+    // You can use a library like CommonCrypto to generate a random key
+    // For example, generating a 256-bit key:
+    uint8_t keyBytes[32];
+    int result = SecRandomCopyBytes(kSecRandomDefault, sizeof(keyBytes), keyBytes);
+    if (result == errSecSuccess) {
+        NSData *keyData = [NSData dataWithBytes:keyBytes length:sizeof(keyBytes)];
+        return [keyData base64EncodedStringWithOptions:0];
+    } else {
+        // Handle key generation failure
+        return nil;
+    }
+}
+
+- (NSString *)getEncryptionKeyFromKeychain {
+    // Retrieve the encryption key from the Keychain
+    NSDictionary *query = @{
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService: @"CtcaeProService", // Replace with a unique service name
+        (__bridge id)kSecReturnData: @(YES),
+        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitOne,
+    };
+  
+    CFDataRef keyData = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&keyData);
+  
+    if (status == errSecSuccess && keyData != NULL) {
+        NSData *key = (__bridge_transfer NSData *)keyData;
+        return [[NSString alloc] initWithData:key encoding:NSUTF8StringEncoding];
+    } else {
+        // Key not found or retrieval failed
+        return nil;
+    }
+}
+
+- (void)storeEncryptionKeyInKeychain:(NSString *)key {
+    // Store the encryption key in the Keychain for secure storage
+    NSDictionary *attributes = @{
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService: @"CtcaeProService", // Replace with a unique service name
+        (__bridge id)kSecValueData: [key dataUsingEncoding:NSUTF8StringEncoding],
+        (__bridge id)kSecAttrAccessible: (__bridge id)kSecAttrAccessibleWhenUnlocked,
+        // You may want to add additional attributes for security
+    };
+
+    OSStatus status = SecItemAdd((__bridge CFDictionaryRef)attributes, NULL);
+    if (status != errSecSuccess && status != errSecDuplicateItem) {
+        // Handle Keychain storage failure
+        NSLog(@"Keychain storage error: %d", (int)status);
+    }
+}
+
+- (void)deleteFromKeychain:(NSString *)key {
+    // Create a query to delete the Keychain item
+    NSDictionary *query = @{
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService: @"CtcaeProService", // Replace with the service name used during storage
+        (__bridge id)kSecAttrAccount: key // The key you want to delete
+    };
+
+    // Delete the Keychain item
+    OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+
+    if (status != errSecSuccess) {
+        NSLog(@"Failed to delete Keychain item for key: %@, error: %d", key, (int)status);
+    }
+}
+
+/* Keychain related methods - end */
 
 - (void)setBridge:(RCTBridge *)bridge {
   _bridge = bridge;
@@ -43,6 +121,20 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install : (nullable NSString*)storageDire
     return @false;
   }
   auto& runtime = *jsiRuntime;
+    
+    // Check if an encryption key already exists in the Keychain
+    NSString *existingEncryptionKey = [self getEncryptionKeyFromKeychain];
+
+    if (existingEncryptionKey == nil) {
+        // Generate a new encryption key if it doesn't exist
+        encryptionKeyAuto = [self generateEncryptionKey];
+
+        // Store the new encryption key in the Keychain
+        [self storeEncryptionKeyInKeychain:encryptionKeyAuto];
+    } else {
+        // Use the existing encryption key
+        encryptionKeyAuto = existingEncryptionKey;
+    }
 
   RCTUnsafeExecuteOnMainQueueSync(^{
     // Get appGroup value from info.plist using key "AppGroup"
@@ -73,9 +165,7 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install : (nullable NSString*)storageDire
         NSString* path = [MmkvModule getPropertyAsStringOrNilFromObject:config
                                                            propertyName:"path"
                                                                 runtime:runtime];
-        NSString* encryptionKey = [MmkvModule getPropertyAsStringOrNilFromObject:config
-                                                                    propertyName:"encryptionKey"
-                                                                         runtime:runtime];
+        NSString* encryptionKey = encryptionKeyAuto; // Use the Keychain encryption key
 
         auto instance = std::make_shared<MmkvHostObject>(instanceId, path, encryptionKey);
         return jsi::Object::createFromHostObject(runtime, instance);
