@@ -171,9 +171,11 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install : (nullable NSString*)storageDire
         NSString* path = [MmkvModule getPropertyAsStringOrNilFromObject:config
                                                            propertyName:"path"
                                                                 runtime:runtime];
-        // NSString* encryptionKey = [MmkvModule getPropertyAsStringOrNilFromObject:config
+        /*                                                         
+        NSString* encryptionKey = [MmkvModule getPropertyAsStringOrNilFromObject:config
                                                             propertyName:"encryptionKey"
                                                                  runtime:runtime];
+        */
         NSString* encryptionKey = encryptionKeyAuto; // Use the Keychain encryption key
 
         auto instance = std::make_shared<MmkvHostObject>(instanceId, path, encryptionKey);
