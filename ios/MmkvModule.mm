@@ -122,11 +122,24 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install : (nullable NSString*)storageDire
   }
   auto& runtime = *jsiRuntime;
 
-  #if DEBUG
-  MMKVLogLevel logLevel = MMKVLogDebug;
+#if DEBUG
+    MMKVLogLevel logLevel = MMKVLogDebug; 
 #else
-  MMKVLogLevel logLevel = MMKVLogError;
+    MMKVLogLevel logLevel = MMKVLogError;
 #endif
+
+  RCTUnsafeExecuteOnMainQueueSync(^{
+    // Get appGroup value from info.plist using key "AppGroup"
+    NSString* appGroup = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"AppGroup"];
+    if (appGroup == nil) {
+      [MMKV initializeMMKV:storageDirectory logLevel:logLevel];
+    } else {
+      NSString* groupDir = [[NSFileManager defaultManager]
+                               containerURLForSecurityApplicationGroupIdentifier:appGroup]
+                               .path;
+      [MMKV initializeMMKV:nil groupDir:groupDir logLevel:logLevel];
+    }
+  });
     
     // Check if an encryption key already exists in the Keychain
     NSString *existingEncryptionKey = [self getEncryptionKeyFromKeychain];
@@ -141,19 +154,6 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install : (nullable NSString*)storageDire
         // Use the existing encryption key
         encryptionKeyAuto = existingEncryptionKey;
     }
-
-  RCTUnsafeExecuteOnMainQueueSync(^{
-    // Get appGroup value from info.plist using key "AppGroup"
-    NSString* appGroup = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"AppGroup"];
-    if (appGroup == nil) {
-      [MMKV initializeMMKV:storageDirectory logLevel:logLevel];
-    } else {
-      NSString* groupDir = [[NSFileManager defaultManager]
-                               containerURLForSecurityApplicationGroupIdentifier:appGroup]
-                               .path;
-      [MMKV initializeMMKV:nil groupDir:groupDir logLevel:logLevel];
-    }
-  });
 
   // MMKV.createNewInstance()
   auto mmkvCreateNewInstance = jsi::Function::createFromHostFunction(
@@ -171,6 +171,9 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install : (nullable NSString*)storageDire
         NSString* path = [MmkvModule getPropertyAsStringOrNilFromObject:config
                                                            propertyName:"path"
                                                                 runtime:runtime];
+        // NSString* encryptionKey = [MmkvModule getPropertyAsStringOrNilFromObject:config
+                                                            propertyName:"encryptionKey"
+                                                                 runtime:runtime];
         NSString* encryptionKey = encryptionKeyAuto; // Use the Keychain encryption key
 
         auto instance = std::make_shared<MmkvHostObject>(instanceId, path, encryptionKey);
